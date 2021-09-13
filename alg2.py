@@ -79,23 +79,10 @@ def gr2(t, y, gamma):
     """
     return -(g2(y, t) + gamma)
 
-# set problem
-y = cp.Variable((3,), pos=True)
-# initial index set
-T1 = [0, np.pi, 2 * np.pi] # initial index set
-T2 = [0, np.pi, 2 * np.pi] # initial index set
-
-# parameter
-sigma = 1e-2
-eps = 1
-    
-# main loop
-itemax = 100
-for k in range(1, itemax + 1):
-    # para
-    eps *= 3 / 4
-    gamma = 1 / (k + 5)
-    delta = 101 / (100 * pow(k, 2))
+def solve_sub(obj, constraints, gamma, eps, delta):
+    """
+    solve RCSIP(T, gamma_k, eps_k)
+    """
     # set sub-problem
     obj = f_eps(y, eps) # objective function
     constraints = [] # constraints list
@@ -107,45 +94,70 @@ for k in range(1, itemax + 1):
     prob = cp.Problem(cp.Minimize(obj), constraints)
     prob.solve()
     yr = y.value
-    if k <= 9: print(k, yr, len(T1), len(T2))
-    if k % 10 == 0: print(k, yr, len(T1), len(T2))
-    #--- Step1-2: search tr \in T
-#     res1 = optimize.minimize_scalar(gr1, bounds=(0, 2*np.pi), args=(yr, gamma), method='bounded',
-#                  tol=None, options=None)
-#     res2 = optimize.minimize_scalar(gr2, bounds=(0, 2*np.pi), args=(yr, gamma), method='bounded',
-#                  tol=None, options=None)
-#     bounds = [(0, 2*np.pi)]
-#     res1 = optimize.shgo(gr1, bounds, args=(yr, gamma))
-#     res2 = optimize.shgo(gr2, bounds, args=(yr, gamma))
-    # initial guess
+    return yr
+
+def find_t(yr, gr, gamma, delta):
+    """
+    find t
+    s.t. gr(yr, t) + gamma_k > delta_k
+    """
     div = 50
     t = np.linspace(0, 2*np.pi, div)
-    y1 = gr1(t, yr, gamma)
-    y2 = gr2(t, yr, gamma)
-    x01 = (2 * np.pi / div) * (np.argmin(y1) + 1)
-    x02 = (2 * np.pi / div) * (np.argmin(y2) + 1)
+    y = gr(t, yr, gamma)
+    x0 = (2 * np.pi / div) * (np.argmin(y) + 1)
     bounds = ((0, 2*np.pi),)
-    res1 = optimize.minimize(gr1, x0=x01, bounds=bounds, args=(yr, gamma,), method="Nelder-Mead", tol=1e-6)
-    res2 = optimize.minimize(gr2, x0=x02, bounds=bounds, args=(yr, gamma,), method="Nelder-Mead", tol=1e-6)
-    res1_fun = -res1.fun # caution
-    res2_fun = -res2.fun # caution
-    res1_t = res1.x
-    res2_t = res2.x
-#     print(res1_t, res2_t)
-#     print(res1_fun, res2_fun, res1_t, res2_t)
-    # criteria
-    if res1_fun <= delta and res2_fun <= delta:
-        #--- step2
-        if max(gamma, delta, eps) < sigma:
-            print("terminate", k, "times")
+    res = optimize.minimize(gr, x0=x0, bounds=bounds, args=(yr, gamma,), method="Nelder-Mead", tol=1e-6)
+    res_fun = -res.fun # caution
+    res_t = res.x
+    return (res_fun, res_t)
+
+# set problem
+y = cp.Variable((3,), pos=True)
+# initial index set
+T1 = [0, np.pi, 2 * np.pi] # initial index set
+T2 = [0, np.pi, 2 * np.pi] # initial index set
+
+# parameter
+sigma = 1e-2
+eps = 1
+    
+itemax = 100
+ite_inner_max = 10
+
+# main loop
+for k in range(1, itemax + 1):
+    # parameters
+    eps *= 3 / 4
+    gamma = 1 / (k + 5)
+    delta = 101 / (100 * pow(k, 3))
+    #--- inner loop
+    for r in range(ite_inner_max):
+        # set sub-problem
+        obj = f_eps(y, eps) # objective function
+        constraints = [] # constraints list
+        for t in T1:
+            constraints += [g1(y, t) <= -gamma]
+        for t in T2:
+            constraints += [g2(y, t) <= -gamma]
+        #--- Step1-1: solve sub-problem
+        yr = solve_sub(obj, constraints, gamma, eps, delta)
+        #--- Step1-2: search tr \in T
+        res1_fun, res1_t = find_t(yr, gr1, gamma, delta)
+        res2_fun, res2_t = find_t(yr, gr2, gamma, delta)
+        # criteria
+        if res1_fun <= delta and res2_fun <= delta:
+            inner = r
             break
-#     T1.append(res1_t)
-#     T2.append(res2_t)
-    # add index of T
-    elif res1_fun > delta:
-        T1.append(res1_t)
-    elif res2_fun > delta:
-        T2.append(res2_t)
+        # add index of T
+        elif res1_fun > delta:
+            T1.append(res1_t)
+        elif res2_fun > delta:
+            T2.append(res2_t)
+    if k<=10: print(k, yr, len(T1), len(T2), inner, gamma >= delta)
+    #--- step2
+    if max(gamma, delta, eps) < sigma:
+        print("terminate", k, "times")
+        break
 print("the optimal value is", yr)
 
 # plot
